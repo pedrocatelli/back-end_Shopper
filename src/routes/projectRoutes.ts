@@ -3,8 +3,6 @@ import { uploadImage } from '../controllers/projectController';
 
 const router = express.Router();
 
-router.post('/upload', uploadImage);
-router.patch('/confirm', uploadImage);
-router.get('/<customer code>/list', uploadImage);
+router.post("/update", uploadImage);
 
 export default router;
