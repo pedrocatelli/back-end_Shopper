@@ -1,13 +1,13 @@
 import { GoogleAIFileManager } from "@google/generative-ai/server";
-import dotenv from 'dotenv';
 import { Request, Response } from 'express';
 import fs from 'fs';
 import path from 'path';
 import { Medidor } from '../types/medidor';
+import crypto from 'crypto';
+import {pool} from '../db';
 
 export const uploadImage = async (req: Request, res: Response) => {
 
-  dotenv.config();
   const { image, customer_code, measure_datetime, measure_type } = req.body as Medidor;
 
 
@@ -58,11 +58,12 @@ export const uploadImage = async (req: Request, res: Response) => {
           fileUri: uploadResponse.file.uri
         }
       },
-      { text: "Qual o numero em destaque na imagem?" },
+      { text: "Qual o numero em destaque na imagem (responda apenas o numero)?" },
     ]);
 
     // Output the generated text to the console
     console.log(result.response.text())
+    console.log(generateTemporaryLink(outputPath))
 
     res.status(200).json({ message: 'Operação realizada com sucesso' });
   } catch (error) {
@@ -70,3 +71,15 @@ export const uploadImage = async (req: Request, res: Response) => {
     res.status(500).json({ message: 'Erro ao fazer upload da imagem' });
   }
 };
+
+async function generateTemporaryLink(imageUrl: string): Promise<string> {
+  const token = crypto.randomBytes(20).toString('hex');
+  const expirationTime = Date.now() + 3600000;
+
+  await pool.query(
+      'INSERT INTO temporary_links (token, image_url, expires_at) VALUES ($1, $2, to_timestamp($3 / 1000.0))',
+      [token, imageUrl, expirationTime]
+  );
+
+  return `http://localhost/download/${token}`;
+}
