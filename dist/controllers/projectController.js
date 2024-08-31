@@ -14,17 +14,29 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.uploadImage = void 0;
 const server_1 = require("@google/generative-ai/server");
-const dotenv_1 = __importDefault(require("dotenv"));
+const crypto_1 = __importDefault(require("crypto"));
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
+const uuid_1 = require("uuid");
+const db_1 = require("../db");
 const uploadImage = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
-    dotenv_1.default.config();
     const { image, customer_code, measure_datetime, measure_type } = req.body;
+    const queryMonth = `
+            SELECT DATE_TRUNC('month', measure_datetime) AS month_start
+            FROM public.measures
+            WHERE customer_id = $1
+              AND measure_type = $2;
+        `;
+    const valuesM = [customer_code, measure_type];
+    const monsthExists = yield db_1.pool.query(queryMonth, valuesM);
     if (!image || !customer_code || !measure_datetime || !measure_type) {
         return res.status(400).json({ error: 'Os dados fornecidos no corpo da requisição são inválidos' });
     }
     else if (measure_type != ('WATER' || 'GAS')) {
         return res.status(400).json({ error: 'Os dados fornecidos no corpo da requisição são inválidos' });
+    }
+    else if (monsthExists != null) {
+        return res.status(400).json({ error: 'Já existe uma leitura para este tipo no mês atual' });
     }
     try {
         const { GoogleGenerativeAI } = require("@google/generative-ai");
@@ -40,6 +52,9 @@ const uploadImage = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 console.log('Imagem salva com sucesso em', outputPath);
             }
         });
+        const queryText1 = 'INSERT INTO customers(customer_code) VALUES($1)';
+        const values1 = [customer_code];
+        yield db_1.pool.query(queryText1, values1);
         // Initialize GoogleAIFileManager with your API_KEY.
         const fileManager = new server_1.GoogleAIFileManager(process.env.GEMINI_API_KEY);
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -53,18 +68,33 @@ const uploadImage = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             displayName: "Medidor",
         });
         // Generate content using text and the URI reference for the uploaded file.
-        const result = yield model.generateContent([
+        const resultado = yield model.generateContent([
             {
                 fileData: {
                     mimeType: uploadResponse.file.mimeType,
                     fileUri: uploadResponse.file.uri
                 }
             },
-            { text: "Qual o numero em destaque na imagem?" },
+            { text: "Qual o numero em destaque na imagem (responda apenas o numero)?" },
         ]);
         // Output the generated text to the console
-        console.log(result.response.text());
-        res.status(200).json({ message: 'Operação realizada com sucesso' });
+        const measure_value = resultado.response.text();
+        const image_url = generateTemporaryLink(outputPath);
+        const measure_uuid = (0, uuid_1.v4)();
+        const query = 'SELECT id FROM customers WHERE customer_code = $1';
+        const value = [customer_code];
+        const id_do_customer = db_1.pool.query(query, value);
+        const queryText = 'INSERT INTO measures(measure_uuid, customer_id, measure_datetime, measure_type, has_confirmed, image_url) VALUES($1, $2, $3, $4, $5, $6)';
+        const values = [measure_uuid, id_do_customer, measure_datetime, measure_type, false, image_url];
+        yield db_1.pool.query(queryText, values);
+        return res.status(200).json({
+            message: 'Operação realizada com sucesso',
+            data: {
+                measure_value,
+                image_url,
+                measure_uuid
+            }
+        });
     }
     catch (error) {
         console.error('Erro ao fazer upload da imagem:', error);
@@ -72,3 +102,11 @@ const uploadImage = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
     }
 });
 exports.uploadImage = uploadImage;
+function generateTemporaryLink(imageUrl) {
+    return __awaiter(this, void 0, void 0, function* () {
+        const token = crypto_1.default.randomBytes(20).toString('hex');
+        const expirationTime = Date.now() + 3600000;
+        yield db_1.pool.query('INSERT INTO temporary_links (token, image_url, expires_at) VALUES ($1, $2, to_timestamp($3 / 1000.0))', [token, imageUrl, expirationTime]);
+        return `http://localhost/download/${token}`;
+    });
+}

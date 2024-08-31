@@ -5,11 +5,11 @@ import { Pool } from 'pg';
 dotenv.config();
 
 export const pool = new Pool({
-  user: process.env.DB_USER,
-  host: process.env.DB_HOST,
-  database: process.env.DB_DATABASE,
-  password: process.env.DB_PASSWORD,
-  port: Number(process.env.DB_PORT),
+  user: "pedro_catelli",
+  host: "10.160.222.11",
+  database: "shopper",
+  password: "senha",
+  port: 5432,
 });
 
 export const getClient = async () => {
